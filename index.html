@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>圖書館專用蕃茄鐘 (PWA 版)</title>
+  <title>圖書館專用蕃茄鐘</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#1d3557">
   <style>
@@ -13,10 +13,12 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100vh;
+      min-height: 100vh;
       background-color: #f7f9fc;
       color: #333;
       margin: 0;
+      padding: 1rem;
+      box-sizing: border-box;
     }
     .card {
       background: white;
@@ -24,16 +26,76 @@
       border-radius: 16px;
       box-shadow: 0 10px 25px rgba(0,0,0,0.05);
       text-align: center;
-      width: 320px;
+      width: 100%;
+      max-width: 360px;
+    }
+    .mode-tabs {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 1.2rem;
+    }
+    .tab-btn {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      border: 1px solid #ccc;
+      background-color: #f8f9fa;
+      color: #555;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .tab-btn.active {
+      background-color: #e63946;
+      color: white;
+      border-color: #e63946;
+      font-weight: bold;
+    }
+    .preset-group {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .preset-btn {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.85rem;
+      border: 1px solid #ddd;
+      background: #fff;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .preset-btn.active {
+      border-color: #1d3557;
+      background-color: #eef2f7;
+      color: #1d3557;
+      font-weight: bold;
+    }
+    .custom-input-group {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 1rem;
+      font-size: 0.9rem;
+    }
+    .custom-input-group input {
+      width: 60px;
+      padding: 0.3rem 0.5rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      text-align: center;
+      font-size: 0.9rem;
     }
     .timer {
       font-size: 4rem;
       font-weight: bold;
-      margin: 1rem 0;
+      margin: 0.5rem 0;
       color: #e63946;
     }
-    button {
-      padding: 0.8rem 1.5rem;
+    .control-btns button {
+      padding: 0.8rem 1.6rem;
       font-size: 1rem;
       border: none;
       border-radius: 8px;
@@ -63,17 +125,42 @@
 
 <div class="card">
   <h2>圖書館專用蕃茄鐘 🍅</h2>
+
+  <!-- 模式切換：專注 vs 休息 -->
+  <div class="mode-tabs">
+    <button class="tab-btn active" id="workTab">🍅 專注模式</button>
+    <button class="tab-btn" id="breakTab">☕ 休息模式</button>
+  </div>
+
+  <!-- 時間預設按鈕 -->
+  <div class="preset-group" id="presetGroup">
+    <button class="preset-btn active" data-time="25">25 分鐘</button>
+    <button class="preset-btn" data-time="50">50 分鐘</button>
+    <button class="preset-btn" data-time="custom">自訂</button>
+  </div>
+
+  <!-- 自訂時間輸入框 (預設隱藏) -->
+  <div class="custom-input-group" id="customInputContainer" style="display: none;">
+    <label for="customMinutes">設定分鐘數：</label>
+    <input type="number" id="customMinutes" min="1" max="120" value="30">
+    <button class="preset-btn" id="applyCustomBtn">套用</button>
+  </div>
+
+  <!-- 時間顯示 -->
   <div class="timer" id="timerDisplay">25:00</div>
 
-  <div>
+  <!-- 控制按鈕 -->
+  <div class="control-btns">
     <button id="startBtn">開始專注</button>
     <button id="resetBtn">重置</button>
   </div>
 
+  <!-- 音訊輸出選擇器 -->
   <select id="audioOutputSelect">
     <option value="">正在載入音訊設備...</option>
   </select>
 
+  <!-- 安全防護狀態標籤 -->
   <div id="statusBox" class="status warn">
     ⚠️ 未偵測到耳機，請選擇耳機輸出
   </div>
@@ -82,11 +169,26 @@
 <audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
 
 <script>
-  let defaultDuration = 25 * 60;
-  let remainingTime = defaultDuration;
+  // 當前狀態
+  let currentMode = 'work'; // 'work' 或 'break'
+  let currentDuration = 25 * 60; // 預設 25 分鐘
+  let remainingTime = currentDuration;
   let isRunning = false;
   let timerWorker = null;
 
+  // 預設選項時間 (分鐘)
+  const presets = {
+    work: [25, 50],
+    break: [5, 15]
+  };
+
+  // DOM 元素
+  const workTab = document.getElementById('workTab');
+  const breakTab = document.getElementById('breakTab');
+  const presetGroup = document.getElementById('presetGroup');
+  const customInputContainer = document.getElementById('customInputContainer');
+  const customMinutesInput = document.getElementById('customMinutes');
+  const applyCustomBtn = document.getElementById('applyCustomBtn');
   const timerDisplay = document.getElementById('timerDisplay');
   const startBtn = document.getElementById('startBtn');
   const resetBtn = document.getElementById('resetBtn');
@@ -106,23 +208,111 @@
           updateDisplay(remainingTime);
         } else if (type === 'finished') {
           isRunning = false;
-          startBtn.textContent = '開始專注';
           updateDisplay(0);
           playAlarmSafely();
+          handleTimerFinished();
         }
       };
     }
   }
 
-  // 2. 更新時間顯示
+  // 2. 計時完成後的自動切換邏輯
+  function handleTimerFinished() {
+    if (currentMode === 'work') {
+      alert("🎉 專注時間結束！準備進入休息模式。");
+      switchMode('break');
+    } else {
+      alert("⚡ 休息結束！準備開始下一輪專注。");
+      switchMode('work');
+    }
+  }
+
+  // 3. 切換專注 / 休息模式
+  function switchMode(mode) {
+    stopTimer();
+    currentMode = mode;
+
+    if (mode === 'work') {
+      workTab.classList.add('active');
+      breakTab.classList.remove('active');
+      startBtn.textContent = '開始專注';
+      timerDisplay.style.color = '#e63946'; // 專注顏色：紅色
+    } else {
+      breakTab.classList.add('active');
+      workTab.classList.remove('active');
+      startBtn.textContent = '開始休息';
+      timerDisplay.style.color = '#2a9d8f'; // 休息顏色：綠色
+    }
+
+    renderPresets();
+  }
+
+  // 4. 渲染預設時間按鈕
+  function renderPresets() {
+    const list = presets[currentMode];
+    presetGroup.innerHTML = '';
+
+    list.forEach((mins, index) => {
+      const btn = document.createElement('button');
+      btn.className = `preset-btn ${index === 0 ? 'active' : ''}`;
+      btn.textContent = `${mins} 分鐘`;
+      btn.dataset.time = mins;
+      btn.addEventListener('click', () => selectPreset(mins, btn));
+      presetGroup.appendChild(btn);
+    });
+
+    // 加入「自訂」按鈕
+    const customBtn = document.createElement('button');
+    customBtn.className = 'preset-btn';
+    customBtn.textContent = '自訂';
+    customBtn.dataset.time = 'custom';
+    customBtn.addEventListener('click', () => selectPreset('custom', customBtn));
+    presetGroup.appendChild(customBtn);
+
+    // 預設選取第一個
+    selectPreset(list[0], presetGroup.children[0]);
+  }
+
+  // 5. 選取時間預設
+  function selectPreset(mins, btnElement) {
+    stopTimer();
+
+    // 更新按鈕樣式
+    Array.from(presetGroup.children).forEach(b => b.classList.remove('active'));
+    if (btnElement) btnElement.classList.add('active');
+
+    if (mins === 'custom') {
+      customInputContainer.style.display = 'flex';
+      setDuration(parseInt(customMinutesInput.value, 10) || 10);
+    } else {
+      customInputContainer.style.display = 'none';
+      setDuration(mins);
+    }
+  }
+
+  function setDuration(minutes) {
+    currentDuration = minutes * 60;
+    remainingTime = currentDuration;
+    updateDisplay(remainingTime);
+  }
+
+  // 6. 停止 / 重置計時器
+  function stopTimer() {
+    if (timerWorker) timerWorker.postMessage({ command: 'stop' });
+    isRunning = false;
+    startBtn.textContent = currentMode === 'work' ? '開始專注' : '開始休息';
+  }
+
+  // 7. 時間顯示更新
   function updateDisplay(seconds) {
     const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
     const secs = (seconds % 60).toString().padStart(2, '0');
     timerDisplay.textContent = `${mins}:${secs}`;
-    document.title = `(${mins}:${secs}) 圖書館蕃茄鐘`;
+    const modeLabel = currentMode === 'work' ? '🍅 專注中' : '☕ 休息中';
+    document.title = `(${mins}:${secs}) ${modeLabel} - 圖書館蕃茄鐘`;
   }
 
-  // 3. 音訊輸出設備檢測
+  // 8. 偵測與選擇耳機
   async function getAudioOutputs() {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
@@ -164,7 +354,7 @@
     }
   }
 
-  // 4. 響鈴保護邏輯
+  // 9. 響鈴保護邏輯
   async function playAlarmSafely() {
     const selectedDeviceId = audioOutputSelect.value;
     const selectedText = audioOutputSelect.options[audioOutputSelect.selectedIndex]?.text || '';
@@ -187,18 +377,25 @@
   }
 
   function fallbackVisualNotice() {
-    alert("⏰ 時間到！(為保護圖書館安靜環境，已自動開啟靜音提醒)");
+    console.log("為保護圖書館安靜環境，改為視覺/系統彈窗提醒");
   }
 
-  // 5. 按鈕事件綁定
+  // 10. 事件綁定
+  workTab.addEventListener('click', () => switchMode('work'));
+  breakTab.addEventListener('click', () => switchMode('break'));
+
+  applyCustomBtn.addEventListener('click', () => {
+    const val = parseInt(customMinutesInput.value, 10);
+    if (val > 0) setDuration(val);
+  });
+
   startBtn.addEventListener('click', () => {
-    // 解決 iOS/Chrome 預先授權音訊播放問題
-    alarmSound.load();
+    alarmSound.load(); // 預先解鎖音訊權限
 
     if (isRunning) {
       timerWorker.postMessage({ command: 'stop' });
       isRunning = false;
-      startBtn.textContent = '繼續專注';
+      startBtn.textContent = '繼續';
     } else {
       timerWorker.postMessage({ command: 'start', duration: remainingTime });
       isRunning = true;
@@ -207,18 +404,16 @@
   });
 
   resetBtn.addEventListener('click', () => {
-    if (timerWorker) timerWorker.postMessage({ command: 'stop' });
-    isRunning = false;
-    remainingTime = defaultDuration;
-    startBtn.textContent = '開始專注';
+    stopTimer();
+    remainingTime = currentDuration;
     updateDisplay(remainingTime);
   });
 
-  // 6. 註冊 Service Worker (PWA)
+  // 11. PWA Service Worker 註冊
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('sw.js')
-        .then(reg => console.log('Service Worker 註冊成功'))
+        .then(() => console.log('Service Worker 註冊成功'))
         .catch(err => console.log('Service Worker 註冊失敗', err));
     });
   }
@@ -227,8 +422,8 @@
 
   // 初始化
   initWorker();
+  renderPresets();
   getAudioOutputs();
-  updateDisplay(remainingTime);
 </script>
 
 </body>
