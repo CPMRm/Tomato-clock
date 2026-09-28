@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>圖書館專用蕃茄鐘 (PWA 版)</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1d3557">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      background-color: #f7f9fc;
+      color: #333;
+      margin: 0;
+    }
+    .card {
+      background: white;
+      padding: 2rem;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.05);
+      text-align: center;
+      width: 320px;
+    }
+    .timer {
+      font-size: 4rem;
+      font-weight: bold;
+      margin: 1rem 0;
+      color: #e63946;
+    }
+    button {
+      padding: 0.8rem 1.5rem;
+      font-size: 1rem;
+      border: none;
+      border-radius: 8px;
+      background-color: #1d3557;
+      color: white;
+      cursor: pointer;
+      margin: 0.2rem;
+    }
+    .status {
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      padding: 0.5rem;
+      border-radius: 6px;
+    }
+    .status.safe { background-color: #d4edda; color: #155724; }
+    .status.warn { background-color: #f8d7da; color: #721c24; }
+    select {
+      width: 100%;
+      padding: 0.5rem;
+      margin-top: 1rem;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>圖書館專用蕃茄鐘 🍅</h2>
+  <div class="timer" id="timerDisplay">25:00</div>
+
+  <div>
+    <button id="startBtn">開始專注</button>
+    <button id="resetBtn">重置</button>
+  </div>
+
+  <select id="audioOutputSelect">
+    <option value="">正在載入音訊設備...</option>
+  </select>
+
+  <div id="statusBox" class="status warn">
+    ⚠️ 未偵測到耳機，請選擇耳機輸出
+  </div>
+</div>
+
+<audio id="alarmSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" preload="auto"></audio>
+
+<script>
+  let defaultDuration = 25 * 60;
+  let remainingTime = defaultDuration;
+  let isRunning = false;
+  let timerWorker = null;
+
+  const timerDisplay = document.getElementById('timerDisplay');
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const audioOutputSelect = document.getElementById('audioOutputSelect');
+  const statusBox = document.getElementById('statusBox');
+  const alarmSound = document.getElementById('alarmSound');
+
+  // 1. 初始化 Web Worker
+  function initWorker() {
+    if (window.Worker) {
+      timerWorker = new Worker('timer-worker.js');
+      
+      timerWorker.onmessage = function (e) {
+        const { type, remaining } = e.data;
+        if (type === 'tick') {
+          remainingTime = remaining;
+          updateDisplay(remainingTime);
+        } else if (type === 'finished') {
+          isRunning = false;
+          startBtn.textContent = '開始專注';
+          updateDisplay(0);
+          playAlarmSafely();
+        }
+      };
+    }
+  }
+
+  // 2. 更新時間顯示
+  function updateDisplay(seconds) {
+    const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+    const secs = (seconds % 60).toString().padStart(2, '0');
+    timerDisplay.textContent = `${mins}:${secs}`;
+    document.title = `(${mins}:${secs}) 圖書館蕃茄鐘`;
+  }
+
+  // 3. 音訊輸出設備檢測
+  async function getAudioOutputs() {
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+
+      audioOutputSelect.innerHTML = '';
+      let hasHeadphone = false;
+
+      audioOutputs.forEach((device, index) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        const label = device.label || `輸出設備 ${index + 1}`;
+        option.text = label;
+
+        if (label.toLowerCase().includes('headphone') || 
+            label.toLowerCase().includes('bluetooth') || 
+            label.toLowerCase().includes('耳機') || 
+            label.toLowerCase().includes('airpods')) {
+          hasHeadphone = true;
+          option.selected = true;
+        }
+        audioOutputSelect.appendChild(option);
+      });
+
+      updateStatus(hasHeadphone);
+    } catch (err) {
+      statusBox.textContent = "無法偵測音訊設備";
+    }
+  }
+
+  function updateStatus(isHeadphone) {
+    if (isHeadphone) {
+      statusBox.className = "status safe";
+      statusBox.textContent = "🛡️ 已連接耳機，可安全提醒";
+    } else {
+      statusBox.className = "status warn";
+      statusBox.textContent = "⚠️ 當前使用揚聲器，時間到將自動改為靜音提醒";
+    }
+  }
+
+  // 4. 響鈴保護邏輯
+  async function playAlarmSafely() {
+    const selectedDeviceId = audioOutputSelect.value;
+    const selectedText = audioOutputSelect.options[audioOutputSelect.selectedIndex]?.text || '';
+    
+    const isHeadphone = selectedText.toLowerCase().includes('headphone') || 
+                        selectedText.toLowerCase().includes('bluetooth') || 
+                        selectedText.toLowerCase().includes('耳機') || 
+                        selectedText.toLowerCase().includes('airpods');
+
+    if (isHeadphone && typeof alarmSound.setSinkId === 'function') {
+      try {
+        await alarmSound.setSinkId(selectedDeviceId);
+        alarmSound.play();
+      } catch (e) {
+        fallbackVisualNotice();
+      }
+    } else {
+      fallbackVisualNotice();
+    }
+  }
+
+  function fallbackVisualNotice() {
+    alert("⏰ 時間到！(為保護圖書館安靜環境，已自動開啟靜音提醒)");
+  }
+
+  // 5. 按鈕事件綁定
+  startBtn.addEventListener('click', () => {
+    // 解決 iOS/Chrome 預先授權音訊播放問題
+    alarmSound.load();
+
+    if (isRunning) {
+      timerWorker.postMessage({ command: 'stop' });
+      isRunning = false;
+      startBtn.textContent = '繼續專注';
+    } else {
+      timerWorker.postMessage({ command: 'start', duration: remainingTime });
+      isRunning = true;
+      startBtn.textContent = '暫停';
+    }
+  });
+
+  resetBtn.addEventListener('click', () => {
+    if (timerWorker) timerWorker.postMessage({ command: 'stop' });
+    isRunning = false;
+    remainingTime = defaultDuration;
+    startBtn.textContent = '開始專注';
+    updateDisplay(remainingTime);
+  });
+
+  // 6. 註冊 Service Worker (PWA)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js')
+        .then(reg => console.log('Service Worker 註冊成功'))
+        .catch(err => console.log('Service Worker 註冊失敗', err));
+    });
+  }
+
+  navigator.mediaDevices.addEventListener('devicechange', getAudioOutputs);
+
+  // 初始化
+  initWorker();
+  getAudioOutputs();
+  updateDisplay(remainingTime);
+</script>
+
+</body>
+</html>
